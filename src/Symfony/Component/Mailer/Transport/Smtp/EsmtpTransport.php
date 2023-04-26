@@ -32,7 +32,7 @@ class EsmtpTransport extends SmtpTransport
     private string $password = '';
     private array $capabilities;
 
-    public function __construct(string $host = 'localhost', int $port = 0, bool $tls = null, EventDispatcherInterface $dispatcher = null, LoggerInterface $logger = null, AbstractStream $stream = null, array $authenticators = null)
+    public function __construct(string $host = 'localhost', int $port = 0, bool $tls = null, bool $startTLS = null, EventDispatcherInterface $dispatcher = null, LoggerInterface $logger = null, AbstractStream $stream = null, array $authenticators = null)
     {
         parent::__construct($stream, $dispatcher, $logger);
 
@@ -61,8 +61,20 @@ class EsmtpTransport extends SmtpTransport
         if (!$tls) {
             $stream->disableTls();
         }
+        if ( null === $startTLS ) {
+            // Port 587 is submission and is by default encrypted
+            // Port 25 is not normally encrypted unless explicity allowed
+            if ( 587 === $port ) {
+                $startTLS = true;
+            } else {
+                $startTLS = \defined('OPENSSL_VERSION_NUMBER') && \array_key_exists('STARTTLS', $this->capabilities);
+            }
+        }
+        if ( !$startTLS ) {
+            $stream->disableStartTLS();
+        }
         if (0 === $port) {
-            $port = $tls ? 465 : 25;
+            $port = $tls ? 465 : $startTLS ? 587 : 25;
         }
 
         $stream->setHost($host);
@@ -142,10 +154,11 @@ class EsmtpTransport extends SmtpTransport
 
         /** @var SocketStream $stream */
         $stream = $this->getStream();
-        // WARNING: !$stream->isTLS() is right, 100% sure :)
-        // if you think that the ! should be removed, read the code again
-        // if doing so "fixes" your issue then it probably means your SMTP server behaves incorrectly or is wrongly configured
-        if (!$stream->isTLS() && \defined('OPENSSL_VERSION_NUMBER') && \array_key_exists('STARTTLS', $this->capabilities)) {
+        // Only if StartTLS is active - there is a situation where no encryption is requested
+        // Prior comment removed as it was offensive to assume that requirements are ignored by a developers wishes
+        // No encryption is a possible requirement and no amount of capabilities should override it
+        // Therefore, SSL/TLS vs STARTTLS if available is not a binary choice
+        if ($stream->isStartTLS()) {
             $this->executeCommand("STARTTLS\r\n", [220]);
 
             if (!$stream->startTLS()) {
